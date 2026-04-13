@@ -47,4 +47,7 @@ export const mastra = new Mastra({
     legislativeCouncilWorkflow,
     legislativeCouncilWithDeliberationWorkflow,
   },
+   server: {
+    port: 4112,
+  },
 });

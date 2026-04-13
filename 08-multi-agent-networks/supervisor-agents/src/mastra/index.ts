@@ -21,4 +21,7 @@ export const mastra = new Mastra({
     name: 'Mastra',
     level: 'info',
   }),
+  server: {
+    port: 4112,
+  },
 });
