@@ -11,3 +11,7 @@ vite.config.ts.timestamp-*
 **/target/
 # DeckForge runtime output
 **/.deckforge-output/
+# Environment files (never commit secrets)
+.env
+**/.env
+!**/.env.example
