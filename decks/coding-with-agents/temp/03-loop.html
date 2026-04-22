@@ -1,0 +1,755 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>The Loop — Coding with Agents</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Barlow:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="shared.css">
+    <style>
+        /* ===== Loop slide layout ===== */
+        .loop-section {
+            align-items: stretch;
+        }
+
+        .loop-stage {
+            margin-top: 2rem;
+            display: grid;
+            grid-template-columns: auto 1fr 1fr;
+            gap: 2.5rem;
+            align-items: start;
+            width: 100%;
+        }
+
+        /* Three columns: rings (auto-sized), TUI + transport (flex), notes (flex) */
+        .loop-col-rings  { display: flex; flex-direction: column; align-items: center; }
+        .loop-col-tui    { display: flex; flex-direction: column; align-items: center; gap: 1.25rem; }
+        .loop-col-notes  { display: flex; flex-direction: column; gap: 1.5rem; }
+
+        /* ===== The dual-ring diagram ===== */
+        .loop-diagram {
+            --ring-outer: 440px;
+            --ring-inner: 300px;
+            --ring-thickness: 2px;
+            position: relative;
+            width: var(--ring-outer);
+            height: var(--ring-outer);
+        }
+
+        .ring {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            border-radius: 50%;
+            border: var(--ring-thickness) solid var(--border);
+            transition: border-color 0.3s ease, opacity 0.4s ease;
+        }
+
+        .ring.ring-outer {
+            width: var(--ring-outer);
+            height: var(--ring-outer);
+        }
+
+        .ring.ring-inner {
+            width: var(--ring-inner);
+            height: var(--ring-inner);
+        }
+
+        /* SVG overlay for the colored arc segments */
+        .ring-arcs {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+        }
+
+        .arc {
+            fill: none;
+            stroke: var(--accent);
+            stroke-width: 3;
+            stroke-linecap: round;
+            opacity: 0;
+            transition: opacity 0.3s ease;
+        }
+
+        .arc.is-lit {
+            opacity: 1;
+        }
+
+        /* Ring labels sitting in the center of the diagram.
+           "Loop 1" is visible during steps 0-3, "Loop 2" during steps 4-7.
+           Nothing shown before step 0. */
+        .ring-label {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-family: var(--font-sans);
+            font-size: 1.1rem;
+            font-weight: 500;
+            text-transform: uppercase;
+            letter-spacing: 0.22em;
+            color: var(--accent);
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.35s ease;
+            z-index: 2;
+            white-space: nowrap;
+        }
+
+        .ring-label.is-active {
+            opacity: 1;
+        }
+
+        /* ===== Phase rectangles =====
+           One rectangle per phase, straddling both rings at its clock position.
+           Lights ONLY when that phase is the currently-active step; otherwise
+           dim. The rings carry the progress history via their arcs.
+
+           Geometry: inner ring r=150, outer ring r=220, midpoint r=185.
+           Rectangle radial span goes from 140 to 230 (90px tall/wide), so each
+           ring sits ~10px inside its respective rectangle edge. */
+        .phase-rect {
+            position: absolute;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-width: 88px;
+            padding: 0.5rem 0.9rem;
+            background: var(--bg-primary);
+            /* Border matches the lit arcs' stroke so the rectangles read as
+               the same visual language as the connecting segments. */
+            border: 3px solid var(--accent);
+            border-radius: 10px;
+            font-family: var(--font-mono);
+            font-size: 0.78rem;
+            font-weight: 500;
+            color: var(--text-dim);
+            text-transform: lowercase;
+            letter-spacing: 0.03em;
+            transition: color 0.3s ease, background 0.3s ease, box-shadow 0.3s ease;
+            z-index: 3;
+        }
+
+        /* Active phase: content lights up (text color + fill). Border is
+           already amber, so the "on" state is carried by the interior fill
+           and glow. */
+        .phase-rect.is-active {
+            color: var(--accent);
+            background: #2a1c08;
+            box-shadow: 0 0 24px rgba(245, 158, 11, 0.35);
+        }
+
+        /* Top & bottom rectangles: 90px tall, span radial 140→230 from center.
+           Diagram center is 220 from top. For perceive (top): rectangle center
+           at (220 - 185) = 35; half-height 45; so top = 35-45 = -10. */
+        .rect-perceive {
+            top: -10px;
+            left: 50%;
+            transform: translateX(-50%);
+            height: 90px;
+        }
+
+        .rect-act {
+            bottom: -10px;
+            left: 50%;
+            transform: translateX(-50%);
+            height: 90px;
+        }
+
+        /* Left & right rectangles: 90px wide, span radial 140→230 from center. */
+        .rect-plan {
+            top: 50%;
+            right: -10px;
+            transform: translateY(-50%);
+            width: 90px;
+            min-width: 0;
+            min-height: 88px;
+            padding: 0.9rem 0.4rem;
+        }
+
+        .rect-observe {
+            top: 50%;
+            left: -10px;
+            transform: translateY(-50%);
+            width: 90px;
+            min-width: 0;
+            min-height: 88px;
+            padding: 0.9rem 0.4rem;
+        }
+
+        /* ===== Center TUI (standalone, not inside the rings) ===== */
+        .loop-tui {
+            background: var(--bg-card);
+            border: 1px solid var(--border-light);
+            border-radius: 10px;
+            overflow: hidden;
+            font-family: var(--font-mono);
+            font-size: 0.82rem;
+            line-height: 1.6;
+            width: 100%;
+            max-width: 440px;
+            margin: 0 auto;
+        }
+
+        .loop-tui .tui-titlebar {
+            padding: 0.5rem 1rem;
+        }
+        .loop-tui .tui-title {
+            font-family: var(--font-sans);
+            font-size: 0.72rem;
+        }
+
+        .loop-tui .tui-body {
+            padding: 1rem 1.1rem;
+            min-height: 260px;
+        }
+
+        .loop-line {
+            opacity: 0;
+            transform: translateY(4px);
+            transition: opacity 0.35s ease, transform 0.35s ease, color 0.35s ease;
+            margin-bottom: 0.35rem;
+            line-height: 1.5;
+        }
+
+        .loop-line.is-visible {
+            opacity: 1;
+            transform: translateY(0);
+        }
+
+        /* When loop 2 begins, loop 1's lines fade slightly — still present in
+           the context window, but no longer the focus. Kept subtle. */
+        .loop-line.loop-done {
+            opacity: 0.7;
+        }
+
+        .loop-line.user    { color: var(--accent); }
+        .loop-line.plan    { color: var(--text-primary); }
+        .loop-line.tool    { color: var(--orange); }
+        .loop-line.result  { color: var(--green); font-style: italic; }
+        .loop-line.summary { color: var(--text-primary); }
+
+        /* Loop indicator inside the TUI */
+        .loop-indicator {
+            font-family: var(--font-sans);
+            font-size: 0.64rem;
+            font-weight: 500;
+            text-transform: uppercase;
+            letter-spacing: 0.15em;
+            color: var(--accent);
+            margin-bottom: 0.6rem;
+            padding-bottom: 0.45rem;
+            border-bottom: 1px dashed var(--border);
+            transition: color 0.3s ease;
+        }
+
+        .loop-indicator.loop-done {
+            color: var(--text-dim);
+        }
+
+        /* ===== Transport controls ===== */
+        .transport {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.4rem;
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 999px;
+        }
+
+        .transport-btn {
+            width: 38px;
+            height: 38px;
+            border-radius: 50%;
+            background: transparent;
+            border: 1px solid transparent;
+            color: var(--text-secondary);
+            font-size: 0.9rem;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.15s ease;
+            font-family: var(--font-sans);
+        }
+
+        .transport-btn:hover:not(:disabled) {
+            color: var(--accent);
+            border-color: var(--accent-border);
+            background: var(--accent-dim);
+        }
+
+        .transport-btn:disabled {
+            opacity: 0.3;
+            cursor: not-allowed;
+        }
+
+        .transport-btn.is-playing {
+            color: var(--accent);
+            background: var(--accent-dim);
+            border-color: var(--accent-border);
+        }
+
+        .transport-separator {
+            width: 1px;
+            height: 20px;
+            background: var(--border);
+            margin: 0 0.15rem;
+        }
+
+        /* Step indicator */
+        .step-indicator {
+            font-family: var(--font-mono);
+            font-size: 0.78rem;
+            color: var(--text-dim);
+            font-variant-numeric: tabular-nums;
+            margin-top: 0.25rem;
+        }
+
+        .step-indicator .step-num {
+            color: var(--text-secondary);
+        }
+
+        /* ===== Context window brick panel (right column) ===== */
+        .ctx-panel {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            overflow: hidden;
+            width: 100%;
+            max-width: 420px;
+            margin: 0 auto;
+        }
+
+        .ctx-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 0.55rem 1rem;
+            border-bottom: 1px solid var(--border);
+            background: rgba(255, 255, 255, 0.015);
+        }
+
+        .ctx-title {
+            font-family: var(--font-sans);
+            font-size: 0.72rem;
+            font-weight: 500;
+            text-transform: uppercase;
+            letter-spacing: 0.15em;
+            color: var(--text-dim);
+        }
+
+        .ctx-tokens {
+            font-family: var(--font-mono);
+            font-size: 0.78rem;
+            color: var(--text-secondary);
+            font-variant-numeric: tabular-nums;
+        }
+
+        /* Legend strip under the header */
+        .ctx-legend {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.4rem 0.9rem;
+            padding: 0.55rem 1rem;
+            border-bottom: 1px solid var(--border);
+            font-size: 0.7rem;
+            color: var(--text-dim);
+        }
+
+        .ctx-legend-item {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.4rem;
+        }
+
+        .ctx-legend-swatch {
+            width: 10px;
+            height: 10px;
+            border-radius: 2px;
+            display: inline-block;
+        }
+
+        /* Brick grid — flex wrap, bricks stack left-to-right and wrap to new rows */
+        .ctx-bricks {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 4px;
+            padding: 1rem;
+            min-height: 260px;
+            align-content: flex-start;
+        }
+
+        .ctx-brick {
+            height: 18px;
+            border-radius: 3px;
+            opacity: 0;
+            transform: translateY(-4px);
+            transition: opacity 0.35s ease, transform 0.35s ease;
+        }
+
+        .ctx-brick.is-visible {
+            opacity: 1;
+            transform: translateY(0);
+        }
+
+        /* Loop-1 bricks dim subtly once loop 2 begins — same rule as before */
+        .ctx-brick.loop-done {
+            opacity: 0.55;
+        }
+
+        /* Brick colors by content type */
+        .ctx-brick.user   { background: var(--accent); }
+        .ctx-brick.think  { background: var(--purple); }
+        .ctx-brick.tool   { background: var(--orange); }
+        .ctx-brick.result { background: var(--green); }
+
+        /* Brick width varies roughly with token weight of the content */
+        .ctx-brick.w-xs { width: 38px;  }
+        .ctx-brick.w-s  { width: 56px;  }
+        .ctx-brick.w-m  { width: 84px;  }
+        .ctx-brick.w-l  { width: 120px; }
+        .ctx-brick.w-xl { width: 160px; }
+
+        /* Responsive: stack columns on narrow screens */
+        @media (max-width: 1200px) {
+            .loop-stage {
+                grid-template-columns: 1fr;
+                gap: 2rem;
+            }
+            .loop-col-tui,
+            .loop-col-notes {
+                max-width: 560px;
+                margin: 0 auto;
+            }
+        }
+
+        @media (max-width: 900px) {
+            .loop-diagram {
+                --ring-outer: 360px;
+                --ring-inner: 240px;
+            }
+        }
+    </style>
+</head>
+<body>
+
+<!-- ===== Top Nav ===== -->
+<nav class="topnav">
+    <a href="01-title.html" class="topnav-brand">Coding with Agents</a>
+    <div class="topnav-sections">
+        <a href="01-title.html">Title</a>
+        <a href="02-xray.html">X-Ray</a>
+        <a href="03-loop.html">The Loop</a>
+        <a href="04-context-budget.html">Context Budget</a>
+    </div>
+</nav>
+
+<!-- ===== Page Content ===== -->
+<div class="page">
+    <main class="main">
+
+        <section class="section loop-section" id="loop">
+            <div class="section-label">THE LOOP</div>
+            <h2>Every turn replays the whole conversation</h2>
+            <p>An agent runs in a loop: <strong>receive</strong> its context, <strong>think</strong> about what to do, <strong>act</strong> by calling a tool, <strong>observe</strong> the result. Then the next user turn starts over — but not from scratch. Watch what happens across two turns.</p>
+
+            <div class="loop-stage" id="loopStage">
+
+                <!-- ===== LEFT: ring diagram ===== -->
+                <div class="loop-col-rings">
+                    <div class="loop-diagram">
+                        <!-- Rings -->
+                        <div class="ring ring-outer" id="ring-outer"></div>
+                        <div class="ring ring-inner" id="ring-inner"></div>
+
+                        <!-- Ring labels -->
+                        <div class="ring-label" id="ringLabelOuter">Loop 1</div>
+                        <div class="ring-label" id="ringLabelInner">Loop 2</div>
+
+                        <!-- SVG arc segments.
+                             Each arc spans a full ring *segment between* two adjacent chips,
+                             not the chip's own position. So the segments are:
+                               perceive→plan, plan→act, act→observe, observe→perceive
+                             for the outer ring, same for the inner ring.
+                             Outer ring r=220, center (220,220).
+                             Inner ring r=150, center (220,220).
+                             Chip clock positions (clockwise from top): 0°, 90°, 180°, 270°.
+                             Each arc goes from ~10° past one chip to ~10° before the next,
+                             leaving a 20° gap at each chip for visual breathing. -->
+                        <svg class="ring-arcs" viewBox="0 0 440 440" xmlns="http://www.w3.org/2000/svg">
+                            <!-- ===== Outer ring arcs (r=220) =====
+                                 data-step N: this arc lights up AFTER step N completes.
+                                 So step 0 (perceive) completing lights the perceive→plan segment. -->
+
+                            <!-- perceive → plan : 10° to 80° (clockwise, top-right quadrant) -->
+                            <path class="arc outer-arc" data-step="0"
+                                  d="M 258.2 3.32 A 220 220 0 0 1 436.68 181.8"/>
+                            <!-- plan → act : 100° to 170° (bottom-right) -->
+                            <path class="arc outer-arc" data-step="1"
+                                  d="M 436.68 258.2 A 220 220 0 0 1 258.2 436.68"/>
+                            <!-- act → observe : 190° to 260° (bottom-left) -->
+                            <path class="arc outer-arc" data-step="2"
+                                  d="M 181.8 436.68 A 220 220 0 0 1 3.32 258.2"/>
+                            <!-- observe → perceive : 280° to 350° (top-left, closes the outer loop) -->
+                            <path class="arc outer-arc" data-step="3"
+                                  d="M 3.32 181.8 A 220 220 0 0 1 181.8 3.32"/>
+
+                            <!-- ===== Inner ring arcs (r=150) ===== -->
+                            <!-- perceive → plan -->
+                            <path class="arc inner-arc" data-step="4"
+                                  d="M 246 74.09 A 150 150 0 0 1 365.91 194"/>
+                            <!-- plan → act -->
+                            <path class="arc inner-arc" data-step="5"
+                                  d="M 365.91 246 A 150 150 0 0 1 246 365.91"/>
+                            <!-- act → observe -->
+                            <path class="arc inner-arc" data-step="6"
+                                  d="M 194 365.91 A 150 150 0 0 1 74.09 246"/>
+                            <!-- observe → perceive -->
+                            <path class="arc inner-arc" data-step="7"
+                                  d="M 74.09 194 A 150 150 0 0 1 194 74.09"/>
+                        </svg>
+
+                        <!-- Phase rectangles — one per phase, straddling both rings.
+                             data-phase is the phase index (0..3). The rectangle
+                             lights only when the current step's phase matches. -->
+                        <div class="phase-rect rect-perceive" data-phase="0">receive</div>
+                        <div class="phase-rect rect-plan"     data-phase="1">think</div>
+                        <div class="phase-rect rect-act"      data-phase="2">act</div>
+                        <div class="phase-rect rect-observe"  data-phase="3">observe</div>
+                    </div>
+                </div>
+
+                <!-- ===== CENTER: TUI + transport + step indicator ===== -->
+                <div class="loop-col-tui">
+                    <div class="loop-tui">
+                        <div class="tui-titlebar">
+                            <div class="tui-dots"><span></span><span></span><span></span></div>
+                            <div class="tui-title">context window</div>
+                        </div>
+                        <div class="tui-body">
+                            <div class="loop-indicator" id="loopIndicator">LOOP 1 OF 2</div>
+                            <div class="loop-lines">
+                                <!-- Loop 1 -->
+                                <div class="loop-line user    loop-1" data-reveal="0">› /refactor the auth middleware to use async/await</div>
+                                <div class="loop-line plan    loop-1" data-reveal="1">Thinking: read auth.ts, find callback patterns, refactor to async.</div>
+                                <div class="loop-line tool    loop-1" data-reveal="2">→ read_file("src/middleware/auth.ts")</div>
+                                <div class="loop-line result  loop-1" data-reveal="3">← 47 lines · 3 exported functions</div>
+                                <!-- Loop 2 -->
+                                <div class="loop-line user    loop-2" data-reveal="4">› also add tests for the wrapper</div>
+                                <div class="loop-line plan    loop-2" data-reveal="5">Thinking: inspect existing tests, mirror style, add wrapper coverage.</div>
+                                <div class="loop-line tool    loop-2" data-reveal="6">→ read_file("test/middleware/auth.spec.ts")</div>
+                                <div class="loop-line result  loop-2" data-reveal="7">← 82 lines · mocha + sinon</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Transport controls -->
+                    <div class="transport" role="toolbar" aria-label="Loop playback controls">
+                        <button class="transport-btn" id="btnRewind"  title="Step back" aria-label="Step back">⏮</button>
+                        <button class="transport-btn" id="btnPlay"    title="Play / Pause" aria-label="Play or pause">▶</button>
+                        <button class="transport-btn" id="btnStop"    title="Stop" aria-label="Stop">⏹</button>
+                        <span class="transport-separator"></span>
+                        <button class="transport-btn" id="btnForward" title="Step forward" aria-label="Step forward">⏭</button>
+                    </div>
+
+                    <div class="step-indicator"><span class="step-num" id="stepNum">0</span> / 8 &nbsp;·&nbsp; <span id="phaseName">ready</span></div>
+                </div>
+
+                <!-- ===== RIGHT: accumulating context window as bricks ===== -->
+                <div class="loop-col-notes">
+                    <div class="ctx-panel">
+                        <div class="ctx-header">
+                            <span class="ctx-title">Context window</span>
+                            <span class="ctx-tokens" id="ctxTokens">0 tokens</span>
+                        </div>
+                        <div class="ctx-legend">
+                            <span class="ctx-legend-item"><span class="ctx-legend-swatch" style="background: var(--accent)"></span>User</span>
+                            <span class="ctx-legend-item"><span class="ctx-legend-swatch" style="background: var(--purple)"></span>Thinking</span>
+                            <span class="ctx-legend-item"><span class="ctx-legend-swatch" style="background: var(--orange)"></span>Tool call</span>
+                            <span class="ctx-legend-item"><span class="ctx-legend-swatch" style="background: var(--green)"></span>Result</span>
+                        </div>
+                        <div class="ctx-bricks">
+                            <!-- Loop 1 bricks — one per loop phase that produces content.
+                                 data-reveal: step at which this brick becomes visible.
+                                 data-tokens: approximate token cost for the counter. -->
+                            <div class="ctx-brick user   w-m loop-1" data-reveal="0" data-tokens="12"></div>
+                            <div class="ctx-brick think  w-l loop-1" data-reveal="1" data-tokens="28"></div>
+                            <div class="ctx-brick tool   w-s loop-1" data-reveal="2" data-tokens="14"></div>
+                            <div class="ctx-brick result w-xl loop-1" data-reveal="3" data-tokens="180"></div>
+                            <!-- Loop 2 bricks -->
+                            <div class="ctx-brick user   w-s  loop-2" data-reveal="4" data-tokens="8"></div>
+                            <div class="ctx-brick think  w-l  loop-2" data-reveal="5" data-tokens="32"></div>
+                            <div class="ctx-brick tool   w-m  loop-2" data-reveal="6" data-tokens="18"></div>
+                            <div class="ctx-brick result w-xl loop-2" data-reveal="7" data-tokens="240"></div>
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+        </section>
+
+    </main>
+</div>
+
+<!-- ===== Scripts ===== -->
+<script src="shared.js"></script>
+<script>
+    initKeyNav(
+        "02-xray.html",
+        "04-context-budget.html",
+        {
+            firstUrl:  "01-title.html",
+            lastUrl:   "17-discipline.html",
+            current:   3,
+            total:     17,
+            deckTitle: "Coding with Agents"
+        }
+    );
+
+    // ===== Loop playback controller =====
+    (function initLoopPlayback() {
+        const PHASE_NAMES = ['receive', 'think', 'act', 'observe',
+                             'receive', 'think', 'act', 'observe'];
+        const TOTAL_STEPS = 8;
+        const STEP_MS     = 2000;
+
+        let step = -1;
+        let playing = false;
+        let timer  = null;
+
+        const stage      = document.getElementById('loopStage');
+        const allRects   = document.querySelectorAll('.phase-rect');
+        const allArcs    = document.querySelectorAll('.arc');
+        const allLines   = document.querySelectorAll('.loop-line');
+        const allBricks  = document.querySelectorAll('.ctx-brick');
+        const btnPlay    = document.getElementById('btnPlay');
+        const btnStop    = document.getElementById('btnStop');
+        const btnRewind  = document.getElementById('btnRewind');
+        const btnForward = document.getElementById('btnForward');
+        const stepNum    = document.getElementById('stepNum');
+        const phaseName  = document.getElementById('phaseName');
+        const loopInd    = document.getElementById('loopIndicator');
+        const ringLblOut = document.getElementById('ringLabelOuter');
+        const ringLblIn  = document.getElementById('ringLabelInner');
+        const ctxTokens  = document.getElementById('ctxTokens');
+
+        function render() {
+            stepNum.textContent = Math.max(0, step + 1);
+            phaseName.textContent = step < 0 ? 'ready' : PHASE_NAMES[step];
+
+            // Loop indicator (inside the TUI)
+            const inLoop2 = step >= 4;
+            loopInd.textContent = inLoop2 ? 'LOOP 2 OF 2' : 'LOOP 1 OF 2';
+
+            // Ring labels (center of diagram): "Loop 1" during steps 0-3,
+            // "Loop 2" during steps 4-7. Hidden before step 0.
+            ringLblOut.classList.toggle('is-active', step >= 0 && step <= 3);
+            ringLblIn.classList.toggle('is-active',  step >= 4);
+
+            // Phase rectangles: active only when the CURRENT step's phase
+            // matches this rect's phase. Steps 0-3 and 4-7 both cycle through
+            // phases 0-3, so rect N is active when step % 4 === N.
+            const currentPhase = step < 0 ? -1 : (step % 4);
+            allRects.forEach(r => {
+                const p = parseInt(r.dataset.phase, 10);
+                r.classList.toggle('is-active', p === currentPhase);
+            });
+
+            // Arcs: each arc represents a completed transition between chips.
+            // Arc N lights when we've moved PAST step N (i.e. step > N), so the
+            // visual reads as "the loop has traveled this segment."
+            allArcs.forEach(a => {
+                const s = parseInt(a.dataset.step, 10);
+                a.classList.toggle('is-lit', step > s);
+            });
+
+            // TUI lines: revealed as their step plays. Loop-1 lines get a subtle
+            // fade once loop 2 begins, to cue "this is history but still loaded".
+            allLines.forEach(ln => {
+                const r = parseInt(ln.dataset.reveal, 10);
+                const isVisible = step >= r;
+                const isLoop1   = ln.classList.contains('loop-1');
+                ln.classList.toggle('is-visible', isVisible);
+                ln.classList.toggle('loop-done',  isVisible && isLoop1 && step >= 4);
+            });
+
+            // Context window bricks: one per phase that produces content.
+            // Revealed as its step plays. Loop-1 bricks dim subtly once loop 2
+            // begins, matching the TUI line behavior. Token counter sums up
+            // the data-tokens of every visible brick.
+            let tokenTotal = 0;
+            allBricks.forEach(b => {
+                const r = parseInt(b.dataset.reveal, 10);
+                const t = parseInt(b.dataset.tokens, 10);
+                const isVisible = step >= r;
+                const isLoop1   = b.classList.contains('loop-1');
+                b.classList.toggle('is-visible', isVisible);
+                b.classList.toggle('loop-done',  isVisible && isLoop1 && step >= 4);
+                if (isVisible) tokenTotal += t;
+            });
+            ctxTokens.textContent = tokenTotal.toLocaleString() + ' tokens';
+
+            // Button states
+            btnRewind.disabled  = step < 0;
+            btnForward.disabled = step >= TOTAL_STEPS - 1;
+            btnPlay.textContent = playing ? '⏸' : '▶';
+            btnPlay.classList.toggle('is-playing', playing);
+        }
+
+        function stepForward() {
+            if (step < TOTAL_STEPS - 1) {
+                step++;
+                render();
+            } else {
+                stop();
+            }
+        }
+
+        function stepBack() {
+            if (step > -1) { step--; render(); }
+        }
+
+        function play() {
+            if (playing) { pause(); return; }
+            if (step >= TOTAL_STEPS - 1) step = -1;
+            playing = true;
+            timer = setInterval(() => {
+                if (step >= TOTAL_STEPS - 1) { pause(); return; }
+                stepForward();
+            }, STEP_MS);
+            stepForward();
+            render();
+        }
+
+        function pause() {
+            playing = false;
+            if (timer) { clearInterval(timer); timer = null; }
+            render();
+        }
+
+        function stop() {
+            playing = false;
+            if (timer) { clearInterval(timer); timer = null; }
+            step = -1;
+            render();
+        }
+
+        btnPlay.addEventListener('click', play);
+        btnStop.addEventListener('click', stop);
+        btnRewind.addEventListener('click', () => { pause(); stepBack(); });
+        btnForward.addEventListener('click', () => { pause(); stepForward(); });
+
+        render();
+    })();
+</script>
+
+</body>
+</html>

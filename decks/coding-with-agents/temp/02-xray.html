@@ -1,0 +1,625 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>X-Ray — Coding with Agents</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Barlow:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="shared.css">
+    <style>
+        /* ===== X-Ray Layout — grid-based, no absolute positioning ===== */
+        .xray-section {
+            /* inherits the 1600px default from .section; no override needed */
+        }
+
+        /* The stage: 3 columns.
+           Left column: a single file-tree panel showing .claude/ repo structure.
+           Center: the TUI.
+           Right column: 4 runtime cards. Commands and skills get colored borders
+           that match their left-column folder color, linking disk to runtime. */
+        .xray-stage {
+            display: grid;
+            grid-template-columns: minmax(260px, 1fr) minmax(640px, 2.2fr) minmax(200px, 1fr);
+            grid-template-rows: auto auto auto auto;
+            gap: 1rem 2.5rem;
+            align-items: stretch;
+            margin-top: 2rem;
+        }
+
+        /* Left column: file tree spans all 4 rows */
+        .xray-tree {
+            grid-column: 1;
+            grid-row: 1 / 5;
+            align-self: center;
+        }
+
+        /* Right column: 4 runtime cards */
+        .c-commands  { grid-column: 3; grid-row: 1; }
+        .c-modes     { grid-column: 3; grid-row: 2; }
+        .c-skills    { grid-column: 3; grid-row: 3; }
+        .c-tools     { grid-column: 3; grid-row: 4; }
+
+        /* Commands and skills get colored accents on both sides */
+        .xray-callout.c-commands { border-left: 3px solid var(--cyan); }
+        .xray-callout.c-skills   { border-left: 3px solid var(--purple); }
+
+        /* ===== Hover highlighting =====
+           When a card is hovered, the stage adds .is-highlighting. Everything
+           inside the stage dims uniformly; only the hovered card and any
+           elements with [data-hl-key] matching the hovered card's
+           [data-highlights] get brought back to full opacity. */
+
+        /* Smooth opacity transitions on everything inside the stage */
+        .xray-stage .xray-callout,
+        .xray-stage .file-tree,
+        .xray-stage .tui-window,
+        .xray-stage .tree-line,
+        .xray-stage .tree-comment,
+        .xray-stage .tui-line,
+        .xray-stage .tui-section,
+        .xray-stage .tui-section-label,
+        .xray-stage .file-tree-header,
+        .xray-stage .tui-titlebar {
+            transition: opacity 0.2s ease, background 0.2s ease;
+        }
+
+        /* When highlighting: dim the card containers and the non-matching
+           tree/TUI leaves. Structural bits (titlebar, section labels, tree
+           header) dim less so layout still reads. */
+        .xray-stage.is-highlighting .xray-callout {
+            opacity: 0.25;
+        }
+
+        .xray-stage.is-highlighting .file-tree,
+        .xray-stage.is-highlighting .tui-window {
+            opacity: 0.6;
+        }
+
+        /* TUI lines dim via color change (not opacity) so individual tags
+           inside can be brightened without fighting opacity inheritance. */
+        .xray-stage.is-highlighting .tui-line {
+            color: rgba(255, 255, 255, 0.18);
+        }
+        .xray-stage.is-highlighting .tui-line.prompt-line { color: rgba(245, 158, 11, 0.25); }
+        .xray-stage.is-highlighting .tui-line.assistant   { color: rgba(236, 236, 240, 0.22); }
+        .xray-stage.is-highlighting .tui-line.tool        { color: rgba(249, 115, 22, 0.25); }
+        .xray-stage.is-highlighting .tui-line.observation { color: rgba(34, 197, 94, 0.25); }
+        .xray-stage.is-highlighting .tui-line.dim-line    { color: rgba(99, 103, 115, 0.4); }
+        .xray-stage.is-highlighting .tui-line .tag        { color: rgba(168, 85, 247, 0.3); }
+
+        .xray-stage.is-highlighting .tree-line,
+        .xray-stage.is-highlighting .tree-comment {
+            opacity: 0.3;
+        }
+
+        .xray-stage.is-highlighting .tui-section-label,
+        .xray-stage.is-highlighting .file-tree-header,
+        .xray-stage.is-highlighting .tui-titlebar {
+            opacity: 0.5;
+        }
+
+        /* Brighten the pinned card and anything matching it */
+        .xray-stage.is-highlighting .xray-callout.is-related {
+            opacity: 1;
+        }
+
+        .xray-stage.is-highlighting .file-tree.has-match,
+        .xray-stage.is-highlighting .tui-window.has-match {
+            opacity: 1;
+        }
+
+        .xray-stage.is-highlighting .tree-line.is-related,
+        .xray-stage.is-highlighting .tree-comment.is-related {
+            opacity: 1;
+            background: rgba(255, 255, 255, 0.035);
+            border-radius: 4px;
+        }
+
+        /* Whole-line TUI match: brighten the entire line. */
+        .xray-stage.is-highlighting .tui-line.is-related {
+            color: inherit;
+            background: rgba(255, 255, 255, 0.035);
+            border-radius: 4px;
+        }
+        /* Restore the color on line types that have their own */
+        .xray-stage.is-highlighting .tui-line.prompt-line.is-related { color: var(--accent); }
+        .xray-stage.is-highlighting .tui-line.assistant.is-related   { color: var(--text-primary); }
+        .xray-stage.is-highlighting .tui-line.tool.is-related        { color: var(--orange); }
+        .xray-stage.is-highlighting .tui-line.observation.is-related { color: var(--green); }
+        .xray-stage.is-highlighting .tui-line.dim-line.is-related    { color: var(--text-dim); }
+
+        /* Granular tag match: brighten only the tag, not its parent line.
+           Used for the status-bar [mode] / [skill] tags. */
+        .xray-stage.is-highlighting .tui-line .tag.is-related {
+            color: var(--purple);
+            background: rgba(255, 255, 255, 0.08);
+            border-radius: 4px;
+            padding: 0 0.3rem;
+        }
+
+        /* Clickable cards: signal affordance, show pinned state */
+        .xray-callout {
+            cursor: pointer;
+            user-select: none;
+        }
+
+        .xray-callout.is-pinned {
+            border-color: var(--accent-border);
+            box-shadow: 0 0 0 1px var(--accent-border);
+        }
+
+        /* ===== File tree panel ===== */
+        .file-tree {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 1rem 1.1rem;
+            font-family: var(--font-mono);
+            font-size: 0.82rem;
+            line-height: 1.75;
+            color: var(--text-secondary);
+        }
+
+        .file-tree-header {
+            display: block;
+            font-family: var(--font-sans);
+            font-size: 0.64rem;
+            font-weight: 500;
+            text-transform: uppercase;
+            letter-spacing: 0.15em;
+            color: var(--text-dim);
+            margin-bottom: 0.75rem;
+            padding-bottom: 0.6rem;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .tree-line {
+            display: grid;
+            grid-template-columns: 1fr auto;
+            gap: 0.75rem;
+            align-items: baseline;
+            padding: 0.05rem 0;
+        }
+
+        .tree-entry {
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .tree-entry .tree-indent { color: var(--text-dim); }
+        .tree-entry .tree-file   { color: var(--text-primary); }
+        .tree-entry .tree-dir    { color: var(--text-secondary); font-weight: 500; }
+
+        /* Alternative path hint — e.g. ".agents/" shown beside ".claude/" */
+        .tree-entry .tree-alt {
+            color: var(--text-dim);
+            font-weight: 400;
+            font-size: 0.76rem;
+        }
+
+        /* Color-coded folder names that link to right-column cards */
+        .tree-entry .tree-dir.cmd    { color: var(--cyan); }
+        .tree-entry .tree-dir.skl    { color: var(--purple); }
+        .tree-entry .tree-file.mem   { color: var(--accent); }
+
+        /* Inline cost badge within the tree (smaller than the main badge) */
+        .tree-cost {
+            font-family: var(--font-mono);
+            font-size: 0.64rem;
+            font-weight: 500;
+            padding: 0.08rem 0.45rem;
+            border-radius: 999px;
+            letter-spacing: 0.03em;
+            white-space: nowrap;
+            line-height: 1.4;
+        }
+
+        .tree-cost.always   { background: rgba(239, 68, 68, 0.12); color: var(--red);    border: 1px solid rgba(239, 68, 68, 0.3); }
+        .tree-cost.ondemand { background: rgba(34, 197, 94, 0.10); color: var(--green);  border: 1px solid rgba(34, 197, 94, 0.3); }
+        .tree-cost.session  { background: rgba(234, 179, 8, 0.10); color: var(--yellow); border: 1px solid rgba(234, 179, 8, 0.32); }
+
+        /* Tree comment rows (for brief annotations under a folder) */
+        .tree-comment {
+            display: block;
+            font-family: var(--font-sans);
+            font-size: 0.72rem;
+            color: var(--text-dim);
+            padding-left: 1.5rem;
+            margin-top: -0.1rem;
+            margin-bottom: 0.3rem;
+            line-height: 1.45;
+        }
+
+        /* Center column: TUI as the anchor, spans all 4 rows, vertically centered. */
+        .xray-center {
+            grid-column: 2;
+            grid-row: 1 / 5;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            gap: 1.25rem;
+        }
+
+        .xray-tui .tui-body {
+            max-height: none;
+            padding: 0;
+        }
+
+        /* Stacked sections inside the TUI: header (session init),
+           content (the actual exchange), footer (status bar). */
+        .tui-section {
+            padding: 0.75rem 1.25rem;
+        }
+
+        .tui-section + .tui-section {
+            border-top: 1px dashed var(--border-light);
+        }
+
+        .tui-section.tui-header,
+        .tui-section.tui-footer {
+            background: rgba(255, 255, 255, 0.015);
+        }
+
+        .tui-section.tui-content {
+            padding: 1rem 1.25rem;
+        }
+
+        .tui-section-label {
+            display: block;
+            font-size: 0.64rem;
+            font-family: var(--font-sans);
+            font-weight: 500;
+            text-transform: uppercase;
+            letter-spacing: 0.15em;
+            color: var(--text-dim);
+            margin-bottom: 0.5rem;
+        }
+
+        .tui-line {
+            margin-bottom: 0.3rem;
+            line-height: 1.5;
+        }
+
+        .tui-line:last-child { margin-bottom: 0; }
+
+        .tui-line.prompt-line { color: var(--accent); }
+        .tui-line.assistant   { color: var(--text-primary); }
+        .tui-line.tool        { color: var(--orange); font-size: 0.82rem; }
+        .tui-line.observation { color: var(--green); font-size: 0.82rem; font-style: italic; }
+        .tui-line.dim-line    { color: var(--text-dim); }
+        .tui-line .tag        { color: var(--purple); }
+
+        /* Callout card — used for both the side callouts and the loop callout */
+        .xray-callout {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 0.75rem 0.9rem;
+            font-size: 0.82rem;
+            line-height: 1.5;
+            color: var(--text-secondary);
+            transition: border-color 0.15s, transform 0.15s;
+        }
+
+        .xray-callout:hover {
+            border-color: var(--accent-border);
+            transform: translateY(-1px);
+        }
+
+        .xray-callout .callout-name {
+            display: block;
+            font-family: var(--font-mono);
+            font-size: 0.8rem;
+            font-weight: 500;
+            color: var(--text-primary);
+            margin-bottom: 0.35rem;
+            letter-spacing: 0.005em;
+        }
+
+        .xray-callout .callout-desc {
+            font-size: 0.78rem;
+            color: var(--text-dim);
+            line-height: 1.5;
+            margin-bottom: 0.55rem;
+        }
+
+        /* Loop callout spans wider, sits under the TUI */
+        .xray-callout.c-loop {
+            text-align: center;
+        }
+
+        .xray-callout.c-loop .callout-desc {
+            max-width: 400px;
+            margin-left: auto;
+            margin-right: auto;
+            margin-bottom: 0.55rem;
+        }
+
+        /* Token-cost badges — the visual currency of the deck */
+        .cost-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.3rem;
+            padding: 0.14rem 0.55rem;
+            border-radius: 999px;
+            font-family: var(--font-mono);
+            font-size: 0.68rem;
+            font-weight: 500;
+            letter-spacing: 0.02em;
+            white-space: nowrap;
+        }
+
+        .cost-badge.always   { background: rgba(239, 68, 68, 0.12); color: var(--red);    border: 1px solid rgba(239, 68, 68, 0.3); }
+        .cost-badge.ondemand { background: rgba(34, 197, 94, 0.10); color: var(--green);  border: 1px solid rgba(34, 197, 94, 0.3); }
+        .cost-badge.session  { background: rgba(234, 179, 8, 0.10); color: var(--yellow); border: 1px solid rgba(234, 179, 8, 0.32); }
+        .cost-badge.loop     { background: var(--accent-dim);       color: var(--accent); border: 1px solid var(--accent-border); }
+
+        /* Legend row under the stage */
+        .xray-legend {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 1.5rem;
+            margin-top: 2.5rem;
+            padding-top: 1.5rem;
+            border-top: 1px solid var(--border);
+            flex-wrap: wrap;
+            font-size: 0.8rem;
+            color: var(--text-dim);
+        }
+
+        .xray-legend .legend-item {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        /* Responsive: collapse to single column on narrow screens */
+        @media (max-width: 1024px) {
+            .xray-stage {
+                grid-template-columns: 1fr;
+                grid-template-rows: auto;
+                gap: 1rem;
+            }
+            .xray-tree,
+            .c-commands, .c-modes, .c-skills, .c-tools,
+            .xray-center {
+                grid-column: 1;
+                grid-row: auto;
+            }
+            .xray-center { order: -1; }
+        }
+    </style>
+</head>
+<body>
+
+<!-- ===== Top Nav ===== -->
+<nav class="topnav">
+    <a href="01-title.html" class="topnav-brand">Coding with Agents</a>
+    <div class="topnav-sections">
+        <a href="01-title.html">Title</a>
+        <a href="02-xray.html">X-Ray</a>
+        <a href="03-loop.html">The Loop</a>
+        <a href="04-context-budget.html">Context Budget</a>
+    </div>
+</nav>
+
+<!-- ===== Page Content ===== -->
+<div class="page">
+    <main class="main">
+
+        <section class="section xray-section" id="xray">
+            <div class="section-label">THE X-RAY</div>
+            <h2>The anatomy of a TUI agent</h2>
+            <p>An agent isn't a single thing. It's a <strong>loop</strong> running inside a <strong>context budget</strong>, shaped by files in your repo, tools you've wired up, and instructions you've written. Here's what's really inside when you run one.</p>
+
+            <div class="xray-stage">
+
+                <!-- ===== Left column: repo tree ===== -->
+                <div class="xray-tree">
+                    <div class="file-tree">
+                        <span class="file-tree-header">In the repo <span class="tree-alt">(or workspace)</span></span>
+
+                        <div class="tree-line">
+                            <span class="tree-entry"><span class="tree-dir">my-project/</span></span>
+                        </div>
+
+                        <div class="tree-line">
+                            <span class="tree-entry"><span class="tree-indent">├── </span><span class="tree-file mem">AGENTS.md</span></span>
+                            <span class="tree-cost always">always</span>
+                        </div>
+                        <span class="tree-comment">Agent-agnostic project memory</span>
+
+                        <div class="tree-line">
+                            <span class="tree-entry"><span class="tree-indent">├── </span><span class="tree-file mem">CLAUDE.md</span></span>
+                            <span class="tree-cost always">always</span>
+                        </div>
+                        <span class="tree-comment">Claude-specific memory (optional)</span>
+
+                        <div class="tree-line">
+                            <span class="tree-entry"><span class="tree-indent">└── </span><span class="tree-dir">.claude/</span> <span class="tree-alt">(or .agents/)</span></span>
+                        </div>
+
+                        <div class="tree-line" data-hl-target data-hl-key="commands">
+                            <span class="tree-entry"><span class="tree-indent">&nbsp;&nbsp;&nbsp;&nbsp;├── </span><span class="tree-dir cmd">commands/</span></span>
+                            <span class="tree-cost ondemand">on invoke</span>
+                        </div>
+                        <span class="tree-comment" data-hl-target data-hl-key="commands">User-invoked shortcuts</span>
+
+                        <div class="tree-line" data-hl-target data-hl-key="skills">
+                            <span class="tree-entry"><span class="tree-indent">&nbsp;&nbsp;&nbsp;&nbsp;├── </span><span class="tree-dir skl">skills/</span></span>
+                            <span class="tree-cost ondemand">on demand</span>
+                        </div>
+                        <span class="tree-comment" data-hl-target data-hl-key="skills">Lazily loaded procedural knowledge</span>
+
+                        <div class="tree-line" data-hl-target data-hl-key="modes">
+                            <span class="tree-entry"><span class="tree-indent">&nbsp;&nbsp;&nbsp;&nbsp;└── </span><span class="tree-file">settings.json</span></span>
+                            <span class="tree-cost session">session</span>
+                        </div>
+                        <span class="tree-comment" data-hl-target data-hl-key="modes">Modes, MCP servers, tool config</span>
+                    </div>
+                </div>
+
+                <!-- ===== Center column: TUI ===== -->
+                <div class="xray-center">
+                    <div class="tui-window xray-tui">
+                        <div class="tui-titlebar">
+                            <div class="tui-dots"><span></span><span></span><span></span></div>
+                            <div class="tui-title">agent — ~/projects/myapp</div>
+                        </div>
+                        <div class="tui-body">
+                            <div class="tui-section tui-header">
+                                <span class="tui-section-label">Session</span>
+                                <div class="tui-line dim-line" data-hl-target data-hl-key="tools"><span class="tag">[loaded]</span> AGENTS.md (842 tokens) · 4 skills available · 11 tools registered</div>
+                            </div>
+
+                            <div class="tui-section tui-content">
+                                <span class="tui-section-label">Conversation</span>
+                                <div class="tui-line prompt-line" data-hl-target data-hl-key="commands">› /refactor the auth middleware to use async/await</div>
+                                <div class="tui-line assistant">I'll read the current implementation first and check the conventions in AGENTS.md.</div>
+                                <div class="tui-line tool" data-hl-target data-hl-key="tools">→ read_file("src/middleware/auth.ts") · 47 lines</div>
+                                <div class="tui-line tool" data-hl-target data-hl-key="tools">→ grep("callback", "src/**") · 3 matches</div>
+                                <div class="tui-line observation">observed: callback-style throughout; tests use mocha + sinon</div>
+                                <div class="tui-line assistant">Planning the refactor. I'll preserve the exported surface and add a compatibility wrapper.</div>
+                            </div>
+
+                            <div class="tui-section tui-footer">
+                                <span class="tui-section-label">Status</span>
+                                <div class="tui-line dim-line"><span class="tag" data-hl-target data-hl-key="modes">[mode] build</span> · <span class="tag" data-hl-target data-hl-key="skills">[skill] typescript-refactor loaded</span> · <span class="tag">[ctx] 3,214 / 200k tokens</span></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ===== Right column: runtime / TUI-exposed ===== -->
+                <div class="xray-callout c-commands" data-highlights="commands" data-hl-target data-hl-key="commands">
+                    <span class="callout-name">/commands</span>
+                    <span class="callout-desc">User-invoked shortcuts. Dormant until you call them.</span>
+                    <span class="cost-badge ondemand">on invoke</span>
+                </div>
+
+                <div class="xray-callout c-modes" data-highlights="modes" data-hl-target data-hl-key="modes">
+                    <span class="callout-name">modes</span>
+                    <span class="callout-desc">Plan · build · review. Swaps system prompt and tool surface.</span>
+                    <span class="cost-badge session">per mode</span>
+                </div>
+
+                <div class="xray-callout c-skills" data-highlights="skills" data-hl-target data-hl-key="skills">
+                    <span class="callout-name">skills/</span>
+                    <span class="callout-desc">Procedural knowledge, lazily loaded. Nothing costs tokens until the skill is pulled in.</span>
+                    <span class="cost-badge ondemand">on demand</span>
+                </div>
+
+                <div class="xray-callout c-tools" data-highlights="tools" data-hl-target data-hl-key="tools">
+                    <span class="callout-name">tools</span>
+                    <span class="callout-desc">Built-ins, MCP servers, custom. Schemas loaded always; bodies only on call.</span>
+                    <span class="cost-badge always">schemas always</span>
+                </div>
+
+            </div>
+
+            <!-- Legend -->
+            <div class="xray-legend">
+                <span class="legend-item"><span class="cost-badge always">always loaded</span> pays every turn</span>
+                <span class="legend-item"><span class="cost-badge session">session</span> pays on load</span>
+                <span class="legend-item"><span class="cost-badge ondemand">on demand</span> pays only when used</span>
+            </div>
+
+            <div class="inline-note accent mt-4">
+                <span class="note-icon">⚡</span>
+                <div>Every component is designed to improve the ability of the model to give great results by controlling what it sees as context.</div>
+            </div>
+        </section>
+
+    </main>
+</div>
+
+<!-- ===== Scripts ===== -->
+<script src="shared.js"></script>
+<script>
+    initKeyNav(
+        null,                    // prev (no slide 1 yet)
+        "03-loop.html",          // next
+        {
+            firstUrl:  "01-title.html",
+            lastUrl:   "17-discipline.html",
+            current:   2,
+            total:     17,
+            deckTitle: "Coding with Agents"
+        }
+    );
+
+    // ===== X-Ray click-to-pin highlighting =====
+    // Clicking a card with [data-highlights="X"] pins the highlight state:
+    // - .is-highlighting goes on the stage
+    // - .is-related goes on every [data-hl-key="X"] target
+    // - .has-match goes on container elements that hold at least one match
+    // Clicking the same card again (or clicking outside, or pressing Esc)
+    // unpins. State persists while presenting.
+    (function initXrayHighlight() {
+        const stage = document.querySelector('.xray-stage');
+        if (!stage) return;
+
+        const triggers = stage.querySelectorAll('[data-highlights]');
+        const targets  = stage.querySelectorAll('[data-hl-target]');
+        const fileTree = stage.querySelector('.file-tree');
+        const tuiWin   = stage.querySelector('.tui-window');
+
+        let pinnedKey = null;
+
+        function setHighlight(key) {
+            // Clear previous state
+            stage.classList.remove('is-highlighting');
+            targets.forEach(t => t.classList.remove('is-related'));
+            triggers.forEach(t => t.classList.remove('is-pinned'));
+            if (fileTree) fileTree.classList.remove('has-match');
+            if (tuiWin)   tuiWin.classList.remove('has-match');
+
+            if (!key) {
+                pinnedKey = null;
+                return;
+            }
+
+            pinnedKey = key;
+            stage.classList.add('is-highlighting');
+
+            triggers.forEach(tr => {
+                if (tr.dataset.highlights === key) tr.classList.add('is-pinned');
+            });
+
+            let treeHit = false, tuiHit = false;
+            targets.forEach(t => {
+                const match = t.dataset.hlKey === key;
+                t.classList.toggle('is-related', match);
+                if (match) {
+                    if (fileTree && fileTree.contains(t)) treeHit = true;
+                    if (tuiWin   && tuiWin.contains(t))   tuiHit  = true;
+                }
+            });
+            if (fileTree) fileTree.classList.toggle('has-match', treeHit);
+            if (tuiWin)   tuiWin.classList.toggle('has-match', tuiHit);
+        }
+
+        triggers.forEach(el => {
+            el.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const key = el.dataset.highlights;
+                setHighlight(pinnedKey === key ? null : key);
+            });
+        });
+
+        document.addEventListener('click', () => {
+            if (pinnedKey) setHighlight(null);
+        });
+
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape' && pinnedKey) setHighlight(null);
+        });
+    })();
+</script>
+
+</body>
+</html>

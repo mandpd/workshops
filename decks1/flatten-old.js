@@ -1,30 +1,24 @@
 #!/usr/bin/env node
 
 /**
- * flatten.js — Bake partial markers into deck slides.
- *
- * Reads hand-authored source files from decks/<name>/source/
- * and writes flattened output to decks/<name>/dist/.
- *
- * Per deck:
- *   source/deck.json          → input manifest
- *   source/NN-slide.html      → input slides with partial markers
- *   dist/NN-slide.html        → flattened, self-contained slides
- *   dist/shared.css           → copied from shared/
- *   dist/shared.js            → copied from shared/
- *   dist/index.html           → generated deck landing page
- *
- * At the repo root:
- *   index.html                → generated hub linking all decks
- *
- * Partial markers replaced:
- *   <!-- partial:head -->     → charset, viewport, fonts, shared.css link
- *   <!-- partial:title -->    → "<slide nav> — <deck title>"
- *   <!-- partial:topnav -->   → full navigation bar
- *   <!-- partial:scripts -->  → <script src="shared.js"></script>
- *   <!-- partial:keynav -->   → <script>initKeyNav(...)</script>
+ * flatten.js — Bake all partial markers into the deck slides in-place.
+ * After running this, every HTML file is self-contained and works
+ * directly from the filesystem (file:// protocol).
  *
  * Usage: node flatten.js
+ *
+ * This replaces:
+ *   <!-- partial:head -->     → meta, fonts, shared.css link
+ *   <!-- partial:title -->    → slide nav label + deck title
+ *   <!-- partial:topnav -->   → full navigation bar
+ *   <!-- partial:scripts -->  → <script src="shared.js"></script>
+ *   <!-- partial:keynav -->   → <script>initKeyNav(prev, next);</script>
+ *
+ * It also:
+ *   - Copies shared.css and shared.js into each deck directory
+ *   - Generates a styled index.html for each deck
+ *   - Generates a root index.html linking all decks
+ *   - Overwrites the source index.html in each deck (the old redirect is gone)
  */
 
 const fs = require("fs");
@@ -32,10 +26,6 @@ const path = require("path");
 
 const DECKS_DIR = path.join(__dirname, "decks");
 const SHARED_DIR = path.join(__dirname, "shared");
-
-// ─── Shared constants ───────────────────────────────────────────────────────
-
-const FONTS_LINK = `<link href="https://fonts.googleapis.com/css2?family=Barlow:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">`;
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -48,18 +38,15 @@ function writeFile(p, content) {
   fs.writeFileSync(p, content, "utf-8");
 }
 
-function ensureDir(p) {
-  fs.mkdirSync(p, { recursive: true });
-}
-
 // ─── Partial Content ────────────────────────────────────────────────────────
 
+// Title placeholder is replaced per-slide in processSlide()
 const HEAD_PARTIAL = `    <meta charset="UTF-8">
     <title><!-- partial:title --></title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    ${FONTS_LINK}
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="shared.css">`;
 
 const SCRIPTS_PARTIAL = `<script src="shared.js"></script>`;
@@ -77,33 +64,18 @@ ${links}
 </nav>`;
 }
 
-/**
- * Build a full initKeyNav(...) call with deck-aware options:
- *   prevUrl, nextUrl, firstUrl, lastUrl, current (1-based), total, deckTitle.
- */
 function getKeyNavCall(deck, slideFile) {
   const idx = deck.slides.findIndex((s) => s.file === slideFile);
-  const total = deck.slides.length;
-
-  const prev = idx > 0 ? JSON.stringify(deck.slides[idx - 1].file) : "null";
+  const prev = idx > 0 ? `"${deck.slides[idx - 1].file}"` : "null";
   const next =
-    idx < total - 1 ? JSON.stringify(deck.slides[idx + 1].file) : "null";
-
-  const first = JSON.stringify(deck.slides[0].file);
-  const last = JSON.stringify(deck.slides[total - 1].file);
-
-  const options =
-    `{ firstUrl: ${first}, lastUrl: ${last}, ` +
-    `current: ${idx + 1}, total: ${total}, ` +
-    `deckTitle: ${JSON.stringify(deck.title)} }`;
-
-  return `initKeyNav(${prev}, ${next}, ${options});`;
+    idx < deck.slides.length - 1 ? `"${deck.slides[idx + 1].file}"` : "null";
+  return `initKeyNav(${prev}, ${next});`;
 }
 
 // ─── Process a single slide ─────────────────────────────────────────────────
 
 function processSlide(html, deck, slideFile) {
-  // 1. Head
+  // 1. Head partial (without title — title is separate)
   html = html.replace(/<!-- partial:head -->/g, HEAD_PARTIAL);
 
   // 2. Title
@@ -114,7 +86,7 @@ function processSlide(html, deck, slideFile) {
   // 3. Topnav
   html = html.replace(/<!-- partial:topnav -->/g, generateTopnav(deck));
 
-  // 4. Scripts
+  // 4. Scripts (shared.js)
   html = html.replace(/<!-- partial:scripts -->/g, SCRIPTS_PARTIAL);
 
   // 5. Keynav
@@ -145,7 +117,7 @@ function generateDeckIndex(deck) {
     <title>${deck.title}</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    ${FONTS_LINK}
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="shared.css">
     <style>
         body { display: flex; align-items: center; justify-content: center; min-height: 100vh; }
@@ -156,8 +128,8 @@ function generateDeckIndex(deck) {
         .slide-grid .card { text-decoration: none; cursor: pointer; padding: 1.25rem; display: flex; flex-direction: column; gap: 0.5rem; }
         .slide-grid .card:hover { border-color: var(--accent); transform: translateY(-2px); }
         .slide-grid .card .demo-number { font-family: var(--font-mono); font-size: 0.85rem; color: var(--accent); }
-        .slide-grid .card h4 { color: var(--text-primary); font-size: 0.95rem; margin: 0; font-weight: 500; }
-        .start-link { display: inline-block; margin-bottom: 2rem; padding: 0.7rem 1.75rem; background: var(--accent); color: #1a1205; text-decoration: none; border-radius: 999px; font-weight: 500; transition: background 0.15s; letter-spacing: 0.01em; }
+        .slide-grid .card h4 { color: var(--text-primary); font-size: 0.95rem; margin: 0; }
+        .start-link { display: inline-block; margin-bottom: 2rem; padding: 0.75rem 2rem; background: var(--accent); color: white; text-decoration: none; border-radius: 8px; font-weight: 600; transition: background 0.2s; }
         .start-link:hover { background: var(--accent-hover); }
     </style>
 </head>
@@ -180,7 +152,7 @@ function generateRootIndex(decks) {
   const deckLinks = decks
     .map(
       (d) =>
-        `        <a href="decks/${d.name}/dist/index.html" class="card"><h4>${d.deck.title}</h4><p>${d.deck.slides.length} slides</p></a>`
+        `        <a href="decks/${d.name}/index.html" class="card"><h4>${d.deck.title}</h4><p>${d.deck.slides.length} slides</p></a>`
     )
     .join("\n");
 
@@ -189,69 +161,33 @@ function generateRootIndex(decks) {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Presentations</title>
+    <title>Mastra Presentations</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    ${FONTS_LINK}
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <style>
         :root {
-            --bg-primary: #06070d;
-            --bg-card: #10131d;
-            --bg-chip: #171a25;
-            --text-primary: #ececf0;
-            --text-secondary: #a8aab3;
-            --text-dim: #636773;
-            --accent: #f59e0b;
-            --accent-hover: #fbbf24;
-            --accent-dim: rgba(245, 158, 11, 0.18);
-            --accent-border: rgba(245, 158, 11, 0.45);
-            --border: rgba(255,255,255,0.06);
-            --border-light: rgba(255,255,255,0.12);
-            --font-sans: 'Barlow', system-ui, -apple-system, sans-serif;
+            --bg-primary: #0a0a0a; --bg-card: #16161e; --text-primary: #e0e0e0;
+            --text-secondary: #a0a0a0; --accent: #6366f1; --accent-hover: #818cf8;
+            --border: rgba(255,255,255,0.06); --border-light: rgba(255,255,255,0.1);
+            --font-sans: 'Inter', system-ui, -apple-system, sans-serif;
         }
         * { margin: 0; padding: 0; box-sizing: border-box; }
-        body {
-            font-family: var(--font-sans);
-            background: var(--bg-primary);
-            color: var(--text-primary);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            min-height: 100vh;
-            font-weight: 400;
-            letter-spacing: 0.005em;
-            -webkit-font-smoothing: antialiased;
-        }
+        body { font-family: var(--font-sans); background: var(--bg-primary); color: var(--text-primary); display: flex; align-items: center; justify-content: center; min-height: 100vh; }
         .index-wrapper { text-align: center; max-width: 900px; padding: 2rem; }
-        h1 { font-size: 2.5rem; font-weight: 500; margin-bottom: 0.5rem; letter-spacing: -0.015em; }
-        .subtitle { color: var(--text-secondary); font-size: 1.1rem; margin-bottom: 2.5rem; font-weight: 300; }
-        .deck-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-            gap: 1.25rem;
-            text-align: left;
-        }
-        .card {
-            background: var(--bg-card);
-            border: 1px solid var(--border);
-            border-radius: 10px;
-            padding: 1.5rem;
-            text-decoration: none;
-            transition: border-color 0.15s, transform 0.15s, background 0.15s;
-        }
-        .card:hover {
-            border-color: var(--accent-border);
-            background: var(--bg-chip);
-            transform: translateY(-2px);
-        }
-        .card h4 { color: var(--text-primary); font-size: 1.05rem; font-weight: 500; margin-bottom: 0.5rem; }
-        .card p { color: var(--text-secondary); font-size: 0.9rem; font-weight: 400; }
+        h1 { font-size: 2.5rem; margin-bottom: 0.5rem; }
+        .subtitle { color: var(--text-secondary); font-size: 1.1rem; margin-bottom: 2.5rem; }
+        .deck-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 1.5rem; text-align: left; }
+        .card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px; padding: 1.5rem; text-decoration: none; transition: border-color 0.2s, transform 0.2s; }
+        .card:hover { border-color: var(--accent); transform: translateY(-2px); }
+        .card h4 { color: var(--text-primary); font-size: 1.1rem; margin-bottom: 0.5rem; }
+        .card p { color: var(--text-secondary); font-size: 0.9rem; }
     </style>
 </head>
 <body>
     <div class="index-wrapper">
-        <h1>Presentations</h1>
-        <p class="subtitle">Presentation hub</p>
+        <h1>Mastra Presentations</h1>
+        <p class="subtitle">Company presentation hub</p>
         <div class="deck-grid">
 ${deckLinks}
         </div>
@@ -265,11 +201,6 @@ ${deckLinks}
 function main() {
   console.log("🔨 Flattening decks...\n");
 
-  if (!fs.existsSync(DECKS_DIR)) {
-    console.error(`✗ No decks directory found at ${DECKS_DIR}`);
-    process.exit(1);
-  }
-
   const deckDirs = fs
     .readdirSync(DECKS_DIR, { withFileTypes: true })
     .filter((d) => d.isDirectory())
@@ -279,16 +210,9 @@ function main() {
 
   for (const name of deckDirs) {
     const deckDir = path.join(DECKS_DIR, name);
-    const sourceDir = path.join(deckDir, "source");
-    const distDir = path.join(deckDir, "dist");
-    const deckJsonPath = path.join(sourceDir, "deck.json");
-
-    if (!fs.existsSync(sourceDir)) {
-      console.warn(`  ⚠ Skipping ${name} — no source/ folder`);
-      continue;
-    }
+    const deckJsonPath = path.join(deckDir, "deck.json");
     if (!fs.existsSync(deckJsonPath)) {
-      console.warn(`  ⚠ Skipping ${name} — no source/deck.json`);
+      console.warn(`  ⚠ Skipping ${name} — no deck.json`);
       continue;
     }
 
@@ -296,36 +220,55 @@ function main() {
     console.log(`  📦 ${name} (${deck.slides.length} slides)`);
     allDecks.push({ name, deck });
 
-    ensureDir(distDir);
-
-    // Process each slide from source/ → dist/
+    // Process each slide in-place
     let flattened = 0;
     for (const slide of deck.slides) {
-      const srcPath = path.join(sourceDir, slide.file);
-      const outPath = path.join(distDir, slide.file);
+      const slidePath = path.join(deckDir, slide.file);
+      if (!fs.existsSync(slidePath)) {
+        console.warn(`    ⚠ Missing: ${slide.file}`);
+        continue;
+      }
+      const html = readFile(slidePath);
 
-      if (!fs.existsSync(srcPath)) {
-        console.warn(`    ⚠ Missing source: ${slide.file}`);
+      // Skip if already flattened (no partial markers)
+      if (!html.includes("<!-- partial:")) {
+        // Still regenerate topnav in case deck.json changed
+        const topnavRegex = /<nav class="topnav">[\s\S]*?<\/nav>/;
+        const newTopnav = generateTopnav(deck);
+        if (topnavRegex.test(html)) {
+          const updated = html.replace(topnavRegex, newTopnav);
+          if (updated !== html) {
+            writeFile(slidePath, updated);
+            console.log(`    ✓ ${slide.file} (topnav refreshed)`);
+          } else {
+            console.log(`    ✓ ${slide.file} (already flattened)`);
+          }
+        } else {
+          console.log(`    ✓ ${slide.file} (already flattened)`);
+        }
         continue;
       }
 
-      const html = readFile(srcPath);
       const processed = processSlide(html, deck, slide.file);
-      writeFile(outPath, processed);
+      writeFile(slidePath, processed);
       flattened++;
       console.log(`    ✓ ${slide.file}`);
     }
 
-    // Copy shared assets into dist/
+    // Copy shared assets into the deck directory
     const sharedCssSrc = path.join(SHARED_DIR, "shared.css");
     const sharedJsSrc = path.join(SHARED_DIR, "shared.js");
-    fs.copyFileSync(sharedCssSrc, path.join(distDir, "shared.css"));
-    fs.copyFileSync(sharedJsSrc, path.join(distDir, "shared.js"));
-    console.log(`    ✓ shared.css, shared.js copied to dist/`);
+    const sharedCssDest = path.join(deckDir, "shared.css");
+    const sharedJsDest = path.join(deckDir, "shared.js");
 
-    // Generate deck index page in dist/
-    writeFile(path.join(distDir, "index.html"), generateDeckIndex(deck));
-    console.log(`    ✓ dist/index.html generated`);
+    fs.copyFileSync(sharedCssSrc, sharedCssDest);
+    fs.copyFileSync(sharedJsSrc, sharedJsDest);
+    console.log(`    ✓ shared.css, shared.js copied`);
+
+    // Generate deck index page
+    const indexPath = path.join(deckDir, "index.html");
+    writeFile(indexPath, generateDeckIndex(deck));
+    console.log(`    ✓ index.html generated`);
 
     console.log(`    ${flattened} slides flattened\n`);
   }

@@ -1,0 +1,34 @@
+{
+  "title": "Coding with Agents",
+  "slides": [
+    { "file": "01-title.html",        "nav": "Title" },
+    { "file": "02-xray.html",         "nav": "X-Ray" },
+    { "file": "03-loop.html",         "nav": "The Loop" },
+    { "file": "04-context-budget.html","nav": "Context Budget" },
+    { "file": "05-config-folder.html", "nav": "Config Folder" },
+    { "file": "06-agents-md.html",    "nav": "AGENTS.md" },
+    { "file": "07-commands.html",     "nav": "Commands" },
+    { "file": "08-modes.html",        "nav": "Modes" },
+    { "file": "09-skills.html",       "nav": "Skills" },
+    { "file": "10-tools.html",        "nav": "Tools" },
+    { "file": "11-subagents.html",    "nav": "Subagents" },
+    { "file": "12-budget-revisit.html","nav": "Budget Revisited" },
+    { "file": "13-agents-md-rules.html","nav": "What Belongs" },
+    { "file": "14-decision.html",     "nav": "Decision Framework" },
+    { "file": "15-tools-curation.html","nav": "Curate Tools" },
+    { "file": "16-failure-modes.html","nav": "Failure Modes" },
+    { "file": "17-discipline.html",   "nav": "The Discipline" }
+  ]
+}
+
+
+
+
+
+
+
+
+
+
+
+

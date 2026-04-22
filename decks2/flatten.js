@@ -1,30 +1,23 @@
 #!/usr/bin/env node
 
 /**
- * flatten.js — Bake partial markers into deck slides.
- *
- * Reads hand-authored source files from decks/<name>/source/
- * and writes flattened output to decks/<name>/dist/.
- *
- * Per deck:
- *   source/deck.json          → input manifest
- *   source/NN-slide.html      → input slides with partial markers
- *   dist/NN-slide.html        → flattened, self-contained slides
- *   dist/shared.css           → copied from shared/
- *   dist/shared.js            → copied from shared/
- *   dist/index.html           → generated deck landing page
- *
- * At the repo root:
- *   index.html                → generated hub linking all decks
- *
- * Partial markers replaced:
- *   <!-- partial:head -->     → charset, viewport, fonts, shared.css link
- *   <!-- partial:title -->    → "<slide nav> — <deck title>"
- *   <!-- partial:topnav -->   → full navigation bar
- *   <!-- partial:scripts -->  → <script src="shared.js"></script>
- *   <!-- partial:keynav -->   → <script>initKeyNav(...)</script>
+ * flatten.js — Bake all partial markers into the deck slides in-place.
+ * After running this, every HTML file is self-contained and works
+ * directly from the filesystem (file:// protocol).
  *
  * Usage: node flatten.js
+ *
+ * This replaces:
+ *   <!-- partial:head -->     → meta, fonts, shared.css link
+ *   <!-- partial:title -->    → slide nav label + deck title
+ *   <!-- partial:topnav -->   → full navigation bar
+ *   <!-- partial:scripts -->  → <script src="shared.js"></script>
+ *   <!-- partial:keynav -->   → <script>initKeyNav(prev, next, {...});</script>
+ *
+ * It also:
+ *   - Copies shared.css and shared.js into each deck directory
+ *   - Generates a styled index.html for each deck
+ *   - Generates a root index.html linking all decks
  */
 
 const fs = require("fs");
@@ -48,12 +41,9 @@ function writeFile(p, content) {
   fs.writeFileSync(p, content, "utf-8");
 }
 
-function ensureDir(p) {
-  fs.mkdirSync(p, { recursive: true });
-}
-
 // ─── Partial Content ────────────────────────────────────────────────────────
 
+// Title placeholder is replaced per-slide in processSlide()
 const HEAD_PARTIAL = `    <meta charset="UTF-8">
     <title><!-- partial:title --></title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -79,7 +69,13 @@ ${links}
 
 /**
  * Build a full initKeyNav(...) call with deck-aware options:
- *   prevUrl, nextUrl, firstUrl, lastUrl, current (1-based), total, deckTitle.
+ *   - prevUrl / nextUrl
+ *   - firstUrl (first slide) / lastUrl (last slide)
+ *   - current (1-based index) / total
+ *   - deckTitle
+ *
+ * These power the fixed footer's slide counter, Home/End keys,
+ * and left-side deck title label.
  */
 function getKeyNavCall(deck, slideFile) {
   const idx = deck.slides.findIndex((s) => s.file === slideFile);
@@ -92,6 +88,7 @@ function getKeyNavCall(deck, slideFile) {
   const first = JSON.stringify(deck.slides[0].file);
   const last = JSON.stringify(deck.slides[total - 1].file);
 
+  // Compact single-line form so it fits cleanly where the partial marker was.
   const options =
     `{ firstUrl: ${first}, lastUrl: ${last}, ` +
     `current: ${idx + 1}, total: ${total}, ` +
@@ -103,7 +100,7 @@ function getKeyNavCall(deck, slideFile) {
 // ─── Process a single slide ─────────────────────────────────────────────────
 
 function processSlide(html, deck, slideFile) {
-  // 1. Head
+  // 1. Head partial (without title — title is separate)
   html = html.replace(/<!-- partial:head -->/g, HEAD_PARTIAL);
 
   // 2. Title
@@ -114,7 +111,7 @@ function processSlide(html, deck, slideFile) {
   // 3. Topnav
   html = html.replace(/<!-- partial:topnav -->/g, generateTopnav(deck));
 
-  // 4. Scripts
+  // 4. Scripts (shared.js)
   html = html.replace(/<!-- partial:scripts -->/g, SCRIPTS_PARTIAL);
 
   // 5. Keynav
@@ -180,7 +177,7 @@ function generateRootIndex(decks) {
   const deckLinks = decks
     .map(
       (d) =>
-        `        <a href="decks/${d.name}/dist/index.html" class="card"><h4>${d.deck.title}</h4><p>${d.deck.slides.length} slides</p></a>`
+        `        <a href="decks/${d.name}/index.html" class="card"><h4>${d.deck.title}</h4><p>${d.deck.slides.length} slides</p></a>`
     )
     .join("\n");
 
@@ -265,11 +262,6 @@ ${deckLinks}
 function main() {
   console.log("🔨 Flattening decks...\n");
 
-  if (!fs.existsSync(DECKS_DIR)) {
-    console.error(`✗ No decks directory found at ${DECKS_DIR}`);
-    process.exit(1);
-  }
-
   const deckDirs = fs
     .readdirSync(DECKS_DIR, { withFileTypes: true })
     .filter((d) => d.isDirectory())
@@ -279,16 +271,9 @@ function main() {
 
   for (const name of deckDirs) {
     const deckDir = path.join(DECKS_DIR, name);
-    const sourceDir = path.join(deckDir, "source");
-    const distDir = path.join(deckDir, "dist");
-    const deckJsonPath = path.join(sourceDir, "deck.json");
-
-    if (!fs.existsSync(sourceDir)) {
-      console.warn(`  ⚠ Skipping ${name} — no source/ folder`);
-      continue;
-    }
+    const deckJsonPath = path.join(deckDir, "deck.json");
     if (!fs.existsSync(deckJsonPath)) {
-      console.warn(`  ⚠ Skipping ${name} — no source/deck.json`);
+      console.warn(`  ⚠ Skipping ${name} — no deck.json`);
       continue;
     }
 
@@ -296,36 +281,55 @@ function main() {
     console.log(`  📦 ${name} (${deck.slides.length} slides)`);
     allDecks.push({ name, deck });
 
-    ensureDir(distDir);
-
-    // Process each slide from source/ → dist/
+    // Process each slide in-place
     let flattened = 0;
     for (const slide of deck.slides) {
-      const srcPath = path.join(sourceDir, slide.file);
-      const outPath = path.join(distDir, slide.file);
+      const slidePath = path.join(deckDir, slide.file);
+      if (!fs.existsSync(slidePath)) {
+        console.warn(`    ⚠ Missing: ${slide.file}`);
+        continue;
+      }
+      const html = readFile(slidePath);
 
-      if (!fs.existsSync(srcPath)) {
-        console.warn(`    ⚠ Missing source: ${slide.file}`);
+      // Skip if already flattened (no partial markers)
+      if (!html.includes("<!-- partial:")) {
+        // Still regenerate topnav in case deck.json changed
+        const topnavRegex = /<nav class="topnav">[\s\S]*?<\/nav>/;
+        const newTopnav = generateTopnav(deck);
+        if (topnavRegex.test(html)) {
+          const updated = html.replace(topnavRegex, newTopnav);
+          if (updated !== html) {
+            writeFile(slidePath, updated);
+            console.log(`    ✓ ${slide.file} (topnav refreshed)`);
+          } else {
+            console.log(`    ✓ ${slide.file} (already flattened)`);
+          }
+        } else {
+          console.log(`    ✓ ${slide.file} (already flattened)`);
+        }
         continue;
       }
 
-      const html = readFile(srcPath);
       const processed = processSlide(html, deck, slide.file);
-      writeFile(outPath, processed);
+      writeFile(slidePath, processed);
       flattened++;
       console.log(`    ✓ ${slide.file}`);
     }
 
-    // Copy shared assets into dist/
+    // Copy shared assets into the deck directory
     const sharedCssSrc = path.join(SHARED_DIR, "shared.css");
     const sharedJsSrc = path.join(SHARED_DIR, "shared.js");
-    fs.copyFileSync(sharedCssSrc, path.join(distDir, "shared.css"));
-    fs.copyFileSync(sharedJsSrc, path.join(distDir, "shared.js"));
-    console.log(`    ✓ shared.css, shared.js copied to dist/`);
+    const sharedCssDest = path.join(deckDir, "shared.css");
+    const sharedJsDest = path.join(deckDir, "shared.js");
 
-    // Generate deck index page in dist/
-    writeFile(path.join(distDir, "index.html"), generateDeckIndex(deck));
-    console.log(`    ✓ dist/index.html generated`);
+    fs.copyFileSync(sharedCssSrc, sharedCssDest);
+    fs.copyFileSync(sharedJsSrc, sharedJsDest);
+    console.log(`    ✓ shared.css, shared.js copied`);
+
+    // Generate deck index page
+    const indexPath = path.join(deckDir, "index.html");
+    writeFile(indexPath, generateDeckIndex(deck));
+    console.log(`    ✓ index.html generated`);
 
     console.log(`    ${flattened} slides flattened\n`);
   }

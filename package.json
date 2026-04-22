@@ -1,7 +1,7 @@
 {
-  "name": "mastra-presentations",
+  "name": "csu-presentations",
   "version": "1.0.0",
-  "description": "Mastra company presentations — dark-themed interactive slide decks",
+  "description": "CSU AI presentations — dark-themed interactive slide decks",
   "scripts": {
     "flatten": "node flatten.js"
   },

@@ -71,7 +71,6 @@
 
     --sidebar-width: 320px;
     --topnav-height: 56px;
-    --footer-height: 56px;
 
     /* Barlow — a touch wider than Inter, great at small sizes */
     --font-sans: 'Barlow', system-ui, -apple-system, 'Segoe UI', sans-serif;
@@ -188,127 +187,33 @@ body {
 .page {
     display: block;
     margin-top: var(--topnav-height);
-    padding-bottom: var(--footer-height);
     min-height: calc(100vh - var(--topnav-height));
 }
 
 /* ===== Main Content ===== */
 .main {
-    width: 100%;
-    max-width: 1600px;
-    margin: 0 auto;
-    padding: 0 2rem;
+    margin-left: 0;
+    flex: 1;
+    padding: 0 4rem;
+    max-width: 100%;
 }
 
 /* ===== Section ===== */
 .section {
-    min-height: calc(100vh - var(--topnav-height) - var(--footer-height));
+    min-height: calc(100vh - var(--topnav-height));
     display: flex;
     flex-direction: column;
     justify-content: center;
     padding: 4rem 0;
     scroll-margin-top: var(--topnav-height);
     border-bottom: 1px solid var(--border);
+    max-width: 960px;
     margin: 0 auto;
 }
 
 .section:last-child {
     border-bottom: none;
 }
-
-/* ===== Deck Footer (fixed) ===== */
-.deck-footer {
-    position: fixed;
-    bottom: 0;
-    left: 0;
-    right: 0;
-    height: var(--footer-height);
-    background: var(--bg-primary);
-    border-top: 1px solid var(--border);
-    display: grid;
-    grid-template-columns: 1fr auto 1fr;
-    align-items: center;
-    padding: 0 1.5rem;
-    z-index: 200;
-    gap: 1rem;
-}
-
-.deck-footer-left {
-    font-size: 0.85rem;
-    color: var(--text-dim);
-    justify-self: start;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-}
-
-.deck-footer-center {
-    display: flex;
-    align-items: center;
-    gap: 0.4rem;
-    justify-self: center;
-}
-
-.deck-footer-right {
-    font-size: 0.85rem;
-    color: var(--text-dim);
-    justify-self: end;
-    white-space: nowrap;
-}
-
-.slide-counter {
-    font-family: var(--font-mono);
-    font-variant-numeric: tabular-nums;
-    font-size: 0.82rem;
-    color: var(--text-secondary);
-    padding: 0.3rem 0.7rem;
-    background: var(--bg-chip);
-    border: 1px solid var(--border);
-    border-radius: 999px;
-}
-
-.footer-btn {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    gap: 0.4rem;
-    min-width: 40px;
-    height: 36px;
-    padding: 0 0.9rem;
-    background: var(--bg-chip);
-    border: 1px solid var(--border);
-    border-radius: 999px;
-    color: var(--text-secondary);
-    font-family: var(--font-sans);
-    font-size: 0.88rem;
-    font-weight: 400;
-    text-decoration: none;
-    cursor: pointer;
-    transition: all 0.15s ease;
-    letter-spacing: 0.005em;
-}
-
-.footer-btn:hover:not(.disabled):not(:disabled) {
-    color: var(--accent);
-    border-color: var(--accent-border);
-    background: var(--accent-dim);
-}
-
-.footer-btn.disabled,
-.footer-btn:disabled {
-    opacity: 0.35;
-    cursor: not-allowed;
-    pointer-events: none;
-}
-
-.footer-btn-prev,
-.footer-btn-next {
-    font-weight: 500;
-    padding: 0 1.1rem;
-}
-
-/* Legacy .section-nav — kept harmless so old slides don't break during migration */
-.section-nav { display: none; }
 
 /* ===== Typography — Barlow, balanced weights ===== */
 h1 {
@@ -797,7 +702,7 @@ strong {
     position: fixed;
     top: var(--topnav-height);
     left: 0;
-    bottom: var(--footer-height);
+    bottom: 0;
     width: var(--sidebar-width, 320px);
     background: var(--bg-sidebar);
     border-right: 1px solid var(--border);
@@ -1344,12 +1249,9 @@ strong {
     width: auto;
 }
 
-/* ===== Section Variants =====
-   .section is centered and inherits .main's 1600px cap. .wide is a no-op here
-   since .main already provides the width — kept for backwards compatibility
-   with upstream decks that use the class. */
+/* ===== Section Variants ===== */
 .section.wide {
-    /* no-op: .main now provides the width cap */
+    max-width: 1200px;
 }
 
 .section.centered {

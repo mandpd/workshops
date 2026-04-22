@@ -194,10 +194,10 @@ body {
 
 /* ===== Main Content ===== */
 .main {
-    width: 100%;
-    max-width: 1600px;
-    margin: 0 auto;
-    padding: 0 2rem;
+    margin-left: 0;
+    flex: 1;
+    padding: 0 4rem;
+    max-width: 100%;
 }
 
 /* ===== Section ===== */
@@ -209,6 +209,7 @@ body {
     padding: 4rem 0;
     scroll-margin-top: var(--topnav-height);
     border-bottom: 1px solid var(--border);
+    max-width: 1600px;
     margin: 0 auto;
 }
 
@@ -1344,12 +1345,9 @@ strong {
     width: auto;
 }
 
-/* ===== Section Variants =====
-   .section is centered and inherits .main's 1600px cap. .wide is a no-op here
-   since .main already provides the width — kept for backwards compatibility
-   with upstream decks that use the class. */
+/* ===== Section Variants ===== */
 .section.wide {
-    /* no-op: .main now provides the width cap */
+    max-width: 1800px;
 }
 
 .section.centered {

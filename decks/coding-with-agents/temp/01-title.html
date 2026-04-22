@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Title — Coding with Agents</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Barlow:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="shared.css">
+    <style>
+        /* ===== Title slide ===== */
+        .title-section {
+            min-height: calc(100vh - var(--topnav-height) - var(--footer-height));
+            align-items: center;
+            text-align: center;
+        }
+
+        /* Wrapper shrinks to the title's width so the rule + subtitle
+           can align to the same visual edge. */
+        .title-block {
+            display: inline-flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        .title-h1 {
+            font-size: 5.25rem;
+            font-weight: 500;
+            line-height: 1.02;
+            letter-spacing: -0.025em;
+            margin: 0 0 1.25rem 0;
+            white-space: nowrap;
+        }
+
+        /* Amber rule stretches to match the title width (inherits from .title-block) */
+        .title-rule {
+            width: 100%;
+            height: 2px;
+            background: var(--accent);
+            border-radius: 1px;
+            margin: 0 0 1.5rem 0;
+        }
+
+        .title-subtitle {
+            font-size: 1.6rem;
+            font-weight: 300;
+            line-height: 1.4;
+            color: var(--text-secondary);
+            margin: 0;
+            letter-spacing: 0.002em;
+        }
+
+        @media (max-width: 768px) {
+            .title-h1       { font-size: 3rem; white-space: normal; }
+            .title-subtitle { font-size: 1.15rem; }
+        }
+    </style>
+</head>
+<body>
+
+<!-- ===== Top Nav ===== -->
+<nav class="topnav">
+    <a href="01-title.html" class="topnav-brand">Coding with Agents</a>
+    <div class="topnav-sections">
+        <a href="01-title.html">Title</a>
+        <a href="02-xray.html">X-Ray</a>
+        <a href="03-loop.html">The Loop</a>
+        <a href="04-context-budget.html">Context Budget</a>
+    </div>
+</nav>
+
+<!-- ===== Page Content ===== -->
+<div class="page">
+    <main class="main">
+
+        <section class="section title-section" id="title">
+            <div class="title-block">
+                <h1 class="title-h1">Anatomy of an Agent</h1>
+                <div class="title-rule"></div>
+                <p class="title-subtitle">An opinionated look at coding with TUI agents.</p>
+            </div>
+        </section>
+
+    </main>
+</div>
+
+<!-- ===== Scripts ===== -->
+<script src="shared.js"></script>
+<script>
+    initKeyNav(
+        null,                    // prev (this is slide 1)
+        "02-xray.html",          // next
+        {
+            firstUrl:  "01-title.html",
+            lastUrl:   "17-discipline.html",
+            current:   1,
+            total:     17,
+            deckTitle: "Coding with Agents"
+        }
+    );
+</script>
+
+</body>
+</html>
